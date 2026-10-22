@@ -2,7 +2,6 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from scipy import stats
 
 st.set_page_config(page_title="Stockholm Housing Statistics", page_icon="🏠", layout="wide")
 
@@ -27,32 +26,25 @@ tab1, tab2, tab3 = st.tabs(["1. Balcony Proportion (Z-Test)", "2. Average Area (
 with tab1:
     st.markdown("### Testing the Proportion of Balconies")
     st.markdown("**Hypothesis:** Is the proportion of houses with a balcony exactly 50%?")
-    st.latex(r"H_0: p = 0.5 \quad 	ext{vs} \quad H_1: p 
-eq 0.5")
+    # Using \mathrm instead of \text to prevent Python from reading \t as a tab
+    st.latex(r"H_0: p = 0.5 \quad \mathrm{vs} \quad H_1: p \neq 0.5")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**R Script Output:**")
-        st.code("prop.test(x= has_bal, n=n, p=0.5, conf.level = 0.99)
-# X-squared = 18.028, df = 1, p-value = 2.177e-05
-# 99 percent confidence interval: 0.5329390 0.6337944
-# sample estimates: p = 0.5842349", language="r")
+        st.code("prop.test(x= has_bal, n=n, p=0.5, conf.level = 0.99)\n# X-squared = 18.028, df = 1, p-value = 2.177e-05\n# 99 percent confidence interval: 0.5329390 0.6337944\n# sample estimates: p = 0.5842349", language="r")
     with col2:
         st.markdown("**Interpretation:**")
-        st.markdown("With a p-value of \(1.825 \times 10^{-5}\) (which is < 0.01), we **reject the null hypothesis**. There is strong evidence that the proportion of houses with a balcony is not 50%.")
+        st.markdown("With a p-value of \(1.825 \\times 10^{-5}\) (which is < 0.01), we **reject the null hypothesis**. There is strong evidence that the proportion of houses with a balcony is not 50%.")
         st.info("**99% Confidence Interval:** (53.4%, 63.4%)")
 
 with tab2:
     st.markdown("### Testing the Average Area")
     st.markdown("**Hypothesis:** Is the average size of a housing unit 75 \(m^2\)?")
-    st.latex(r"H_0: \mu = 75 \quad 	ext{vs} \quad H_1: \mu 
-eq 75")
+    st.latex(r"H_0: \mu = 75 \quad \mathrm{vs} \quad H_1: \mu \neq 75")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**R Script Output:**")
-        st.code("t.test(DataSet$AREA, mu = 75, conf.level = 0.95)
-# t = 1.3775, df = 646, p-value = 0.1688
-# 95 percent confidence interval: 74.16363 79.76747
-# sample estimates: mean of x = 76.96555", language="r")
+        st.code("t.test(DataSet$AREA, mu = 75, conf.level = 0.95)\n# t = 1.3775, df = 646, p-value = 0.1688\n# 95 percent confidence interval: 74.16363 79.76747\n# sample estimates: mean of x = 76.96555", language="r")
     with col2:
         st.markdown("**Interpretation:**")
         st.markdown("With a p-value of 0.1688 (which is > 0.05), we **fail to reject the null hypothesis**. The average area is statistically indistinguishable from 75 \(m^2\).")
