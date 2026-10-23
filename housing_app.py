@@ -10,14 +10,15 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import requests
 
 # -----------------------------------------------------------------------------
 # CONFIG: edit these
 # -----------------------------------------------------------------------------
 AUTHOR = "Prashant Kumar Singh"
 TAGLINE = "MSc Data Science, Stockholm University"
-GITHUB = "https://github.com/"        # replace with your profile / repo
-LINKEDIN = "https://www.linkedin.com/"  # replace with your profile
+GITHUB = "https://github.com/PrashantSU"        # replace with your profile / repo
+LINKEDIN = "https://www.linkedin.com/in/prashant-singh-173a89215/"  # replace with your profile
 
 IMG_HERO = "https://images.unsplash.com/photo-1509356843151-3e7d96241e11?auto=format&fit=crop&w=1800&q=80"
 IMG_A = "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=900&q=80"
@@ -95,29 +96,22 @@ p, li, label, .stMarkdown, .stCaption {{ font-family:'Manrope',sans-serif !impor
 # HELPERS
 # -----------------------------------------------------------------------------
 def html(s: str):
-    """Render HTML safely (strips indentation/blank lines so markdown never treats it as code)."""
     st.markdown("".join(line.strip() for line in s.splitlines()), unsafe_allow_html=True)
-
 
 def prose(s: str):
     html(f"<p class='prose'>{s}</p>")
 
-
 def stat(label, value, note="", tone=""):
     return f"<div class='stat {tone}'><div class='v'>{value}</div><div class='l'>{label}</div><div class='n'>{note}</div></div>"
-
 
 def finding(title, text):
     html(f"<div class='finding'><b>{title}</b><p>{text}</p></div>")
 
-
 def callout(text, kind="note"):
     html(f"<div class='callout {kind}'>{text}</div>")
 
-
 def photo(url, caption):
     return f"<div class='photo' style=\"background-image:url('{url}')\"></div><p class='cap'>{caption}</p>"
-
 
 def style(fig, h=340, **kw):
     title = kw.pop("title", None)
@@ -130,10 +124,8 @@ def style(fig, h=340, **kw):
     fig.update_layout(**layout)
     return fig
 
-
 def show(fig):
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
 
 def ci_plot(lo, est, hi, null, unit, title, h=150):
     fig = go.Figure()
@@ -148,25 +140,36 @@ def ci_plot(lo, est, hi, null, unit, title, h=150):
     style(fig, h, showlegend=False, title=title, margin=dict(l=16, r=16, t=56, b=24))
     return fig
 
-
 # -----------------------------------------------------------------------------
-# MODEL (fitted in R; coefficients copied from the final lm output)
+# MODEL CONSTANTS (Used for the "Model" page UI)
 # -----------------------------------------------------------------------------
-B0, SIGMA = 13.8988571, 0.3525
 REGION = {"Northeast": 0.0, "Northwest": 0.1850940, "Southeast": -0.1972418, "Stockholm": 0.3768469, "West": -0.4179828}
 TYPE = {"Apartment": 0.0, "Terrace": -0.0762431, "Villa": 0.1829979}
 BALC = {"No": 0.0, "Yes": -0.0697553}
-B_ROOMS, B_AREA, B_INT = 0.1103812, 0.0138216, -0.0010429
 
-
-def size_term(rooms, area):
-    return B_ROOMS * rooms + B_AREA * area + B_INT * rooms * area
-
+# -----------------------------------------------------------------------------
+# API CONFIGURATION (MLOps Pipeline)
+# -----------------------------------------------------------------------------
+# REPLACE WITH YOUR RENDER URL
+API_URL = "https://housing-api-latest.onrender.com" 
 
 def predict_price(region, h_type, balcony, rooms, area):
-    lp = B0 + REGION[region] + TYPE[h_type] + BALC[balcony] + size_term(rooms, area)
-    return np.exp(lp), np.exp(lp - 1.96 * SIGMA), np.exp(lp + 1.96 * SIGMA)
-
+    payload = {
+        "region": region,
+        "h_type": h_type,
+        "balcony": balcony,
+        "rooms": rooms,
+        "area": area
+    }
+    try:
+        # HTTP POST to FastAPI Docker Container on Render
+        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        return data["price"], data["lower"], data["upper"], data["contributions"]
+    except Exception as e:
+        st.error(f"API Error: Could not fetch prediction. (Render might be asleep, wait 30s and click again). {e}")
+        return 0, 0, 0, {}
 
 # -----------------------------------------------------------------------------
 # SIDEBAR
@@ -413,47 +416,54 @@ elif page == "Valuation engine":
         area = st.slider("Area (m²)", 15, 250, 75)
         rooms = st.slider("Rooms", 1.0, 8.0, 3.0, 0.5)
 
-    price, lo, hi = predict_price(region, h_type, balcony, rooms, area)
-    median = 3.49e6
-    diff = (price / median - 1) * 100
-    html(f"""
-    <div class='result'>
-      <div class='l'>Estimated starting price</div>
-      <div class='v'>{price:,.0f} SEK</div>
-      <div class='r'>95% prediction interval: {lo:,.0f} to {hi:,.0f} SEK. That is {abs(diff):.0f}% {"above" if diff >= 0 else "below"} the market median.</div>
-    </div>""")
+    # API CALL replaces local math
+    price, lo, hi, contribs = predict_price(region, h_type, balcony, rooms, area)
+    
+    if price > 0:
+        median = 3.49e6
+        diff = (price / median - 1) * 100
+        html(f"""
+        <div class='result'>
+          <div class='l'>Estimated starting price</div>
+          <div class='v'>{price:,.0f} SEK</div>
+          <div class='r'>95% prediction interval: {lo:,.0f} to {hi:,.0f} SEK. That is {abs(diff):.0f}% {"above" if diff >= 0 else "below"} the market median.</div>
+        </div>""")
 
-    st.write("")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=[lo / 1e6, hi / 1e6], y=[0, 0], mode="lines", line=dict(color=TEAL, width=14), hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=[price / 1e6], y=[0], mode="markers", marker=dict(color=INK, size=18, line=dict(color="#fff", width=3)), hoverinfo="skip"))
-    fig.add_vline(x=median / 1e6, line_dash="dash", line_color=FALU, annotation_text="market median", annotation_position="top")
-    fig.update_yaxes(visible=False)
-    fig.update_xaxes(title="Price (M SEK)", rangemode="tozero")
-    style(fig, 180, showlegend=False, title="Where this home sits", margin=dict(l=16, r=16, t=56, b=40))
-    show(fig)
+        st.write("")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[lo / 1e6, hi / 1e6], y=[0, 0], mode="lines", line=dict(color=TEAL, width=14), hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=[price / 1e6], y=[0], mode="markers", marker=dict(color=INK, size=18, line=dict(color="#fff", width=3)), hoverinfo="skip"))
+        fig.add_vline(x=median / 1e6, line_dash="dash", line_color=FALU, annotation_text="market median", annotation_position="top")
+        fig.update_yaxes(visible=False)
+        fig.update_xaxes(title="Price (M SEK)", rangemode="tozero")
+        style(fig, 180, showlegend=False, title="Where this home sits", margin=dict(l=16, r=16, t=56, b=40))
+        show(fig)
 
-    st.markdown("### How the estimate is built")
-    prose("Starting from the model's baseline, each group of features is applied in turn. "
-          "Because effects multiply, the SEK amounts depend on the order shown.")
-    steps = [("Size (area, rooms, interaction)", size_term(rooms, area)), ("Region", REGION[region]),
-             ("Housing type", TYPE[h_type]), ("Balcony", BALC[balcony])]
-    cum, prev, names, deltas = B0, np.exp(B0), ["Baseline"], [np.exp(B0)]
-    for n, v in steps:
-        cum += v
-        new = np.exp(cum)
-        names.append(n); deltas.append(new - prev); prev = new
-    names.append("Estimate"); deltas.append(prev)
-    fig = go.Figure(go.Waterfall(x=names, y=[d / 1e6 for d in deltas], measure=["absolute"] + ["relative"] * 4 + ["absolute"],
-                                 increasing=dict(marker=dict(color=TEAL)), decreasing=dict(marker=dict(color=FALU)),
-                                 totals=dict(marker=dict(color=INK)), connector=dict(line=dict(color=LINE)),
-                                 text=[f"{d/1e6:+.2f}M" if 0 < i < 5 else f"{d/1e6:.2f}M" for i, d in enumerate(deltas)],
-                                 textposition="outside"))
-    fig.update_yaxes(title="M SEK")
-    style(fig, 400, title="Feature contributions", showlegend=False)
-    show(fig)
-    st.markdown("<p class='disc'>Intervals are wide by design: the model's residual standard error of 0.3525 on the log scale means a typical "
-                "95% interval runs from about half to about double the point estimate.</p>", unsafe_allow_html=True)
+        st.markdown("### How the estimate is built")
+        prose("Starting from the model's baseline, each group of features is applied in turn. "
+              "Because effects multiply, the SEK amounts depend on the order shown.")
+        
+        # API contributes direct values for the waterfall
+        names = ["Baseline", "Size (area, rooms)", "Region", "Housing type", "Balcony", "Estimate"]
+        deltas = [
+            contribs.get("baseline", 0),
+            contribs.get("size", 0),
+            contribs.get("region", 0),
+            contribs.get("type", 0),
+            contribs.get("balcony", 0),
+            price
+        ]
+        
+        fig = go.Figure(go.Waterfall(x=names, y=[d / 1e6 for d in deltas], measure=["absolute"] + ["relative"] * 4 + ["absolute"],
+                                     increasing=dict(marker=dict(color=TEAL)), decreasing=dict(marker=dict(color=FALU)),
+                                     totals=dict(marker=dict(color=INK)), connector=dict(line=dict(color=LINE)),
+                                     text=[f"{d/1e6:+.2f}M" if 0 < i < 5 else f"{d/1e6:.2f}M" for i, d in enumerate(deltas)],
+                                     textposition="outside"))
+        fig.update_yaxes(title="M SEK")
+        style(fig, 400, title="Feature contributions", showlegend=False)
+        show(fig)
+        st.markdown("<p class='disc'>Intervals are wide by design: the model's residual standard error of 0.3525 on the log scale means a typical "
+                    "95% interval runs from about half to about double the point estimate.</p>", unsafe_allow_html=True)
 
 # =============================================================================
 # HELD-OUT PREDICTIONS
@@ -498,7 +508,7 @@ else:
           "This app presents the results and reimplements the final model in Python for the interactive valuation tool.")
     html("".join(f"<span class='tag'>{t}</span>" for t in
                  ["Hypothesis testing", "Confidence intervals", "Multiple linear regression", "Log transformation", "Interaction terms",
-                  "Residual diagnostics", "Prediction intervals", "R", "Python", "Streamlit", "Plotly"]))
+                  "Residual diagnostics", "Prediction intervals", "R", "Python", "Streamlit", "Plotly", "FastAPI", "Docker", "MLOps"]))
 
     st.markdown("## What I would do next")
     finding("Validate out of sample", "Replace the six-point check with k-fold cross-validation and report RMSE and interval coverage.")
